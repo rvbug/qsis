@@ -1,90 +1,61 @@
-use crossterm::event::{self, Event, KeyCode};
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-    style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
-    Terminal,
-};
-use std::io;
+mod relativity;
+mod tui;
 
-const C: f64 = 299_792_458.0; // speed of light in m/s
+use clap::{Parser, Subcommand};
+use relativity::special::lorentz_factor;
 
-fn lorentz_factor(v: f64) -> f64 {
-    1.0 / (1.0 - (v * v) / (C * C)).sqrt()
+/// QSIS - Quantum Spacetime Intelligence System
+#[derive(Parser)]
+#[command(name = "qsis", about = "Rust framework for computational time travel")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
 }
 
-fn main() -> Result<(), io::Error> {
-    // Setup terminal
-    let mut stdout = io::stdout();
-    crossterm::terminal::enable_raw_mode()?;
-    let backend = CrosstermBackend::new(&mut stdout);
-    let mut terminal = Terminal::new(backend)?;
+#[derive(Subcommand)]
+enum Commands {
+    /// Run interactive TUI simulation
+    Tui,
+    /// Generate metrics and export to CSV
+    Metrics,
+}
 
-    // Simulation state
-    let mut velocity_fraction: f64 = 0.0; // in units of c
-    let proper_time: f64 = 10.0; // years
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
 
-    loop {
-        terminal.draw(|f| {
-            let size = f.size();
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(2)
-                .constraints(
-                    [Constraint::Length(3), Constraint::Length(3), Constraint::Length(3)]
-                        .as_ref(),
-                )
-                .split(size);
-
-            let v = velocity_fraction * C;
-            let gamma = lorentz_factor(v);
-            let dilated_time = proper_time * gamma;
-
-            let velocity_text =
-                format!("Velocity: {:.2}c", velocity_fraction);
-            let gamma_text = format!("Lorentz factor (γ): {:.4}", gamma);
-            let time_text = format!(
-                "Proper time: {:.1} years | Dilated time: {:.2} years",
-                proper_time, dilated_time
-            );
-
-            let blocks = vec![
-                Paragraph::new(velocity_text).block(Block::default().borders(Borders::ALL)),
-                Paragraph::new(gamma_text).block(Block::default().borders(Borders::ALL)),
-                Paragraph::new(time_text).block(Block::default().borders(Borders::ALL)),
-            ];
-
-            for (i, b) in blocks.into_iter().enumerate() {
-                f.render_widget(b, chunks[i]);
-            }
-        })?;
-
-        // Input handling
-        if event::poll(std::time::Duration::from_millis(200))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Right => {
-                        if velocity_fraction < 0.99 {
-                            velocity_fraction += 0.01;
-                        }
-                    }
-                    KeyCode::Left => {
-                        if velocity_fraction > 0.0 {
-                            velocity_fraction -= 0.01;
-                        }
-                    }
-                    KeyCode::Char('q') => {
-                        crossterm::terminal::disable_raw_mode()?;
-                        terminal.show_cursor()?;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        }
+    match cli.command {
+        Some(Commands::Tui) => tui::start()?,
+        Some(Commands::Metrics) => run_metrics()?,
+        None => tui::start()?, // default
     }
 
+    Ok(())
+}
+
+fn run_metrics() -> anyhow::Result<()> {
+    use std::fs::File;
+    use std::io::Write;
+    let mut file = File::create("metrics.csv")?;
+    writeln!(file, "velocity_fraction,gamma,proper_time,dilated_time, proper_length, contracted_length")?;
+
+    let proper_time = 10.0; // years
+    let proper_length = 100.0; // meters
+    
+    for i in 0..100 {
+        let v_frac = i as f64 / 100.0;
+        let v = v_frac * relativity::special::C;
+        let gamma = lorentz_factor(v);
+        let dilated_time = proper_time * gamma;
+        let contracted_length = relativity::special::length_contraction(proper_length, v);
+        writeln!(
+        file,
+        "{:.2},{:.6},{:.1},{:.6},{:.1},{:.6}",
+        v_frac, gamma, proper_time, dilated_time, proper_length, contracted_length
+    )?;
+
+    }
+
+    println!("✅ Metrics written to metrics.csv");
     Ok(())
 }
 
