@@ -1,8 +1,10 @@
 mod relativity;
 mod tui;
+mod metrics;
 
 use clap::{Parser, Subcommand};
 use relativity::special::lorentz_factor;
+use anyhow::Result;
 
 /// QSIS - Quantum Spacetime Intelligence System
 #[derive(Parser)]
@@ -33,10 +35,10 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn run_metrics() -> anyhow::Result<()> {
-    use std::fs::File;
-    use std::io::Write;
-    let mut file = File::create("metrics.csv")?;
-    writeln!(file, "velocity_fraction,gamma,proper_time,dilated_time, proper_length, contracted_length")?;
+    // use std::fs::File;
+    // use std::io::Write;
+    // let mut file = File::create("metrics.csv")?;
+    // writeln!(file, "velocity_fraction,gamma,proper_time,dilated_time, proper_length, contracted_length")?;
 
     let proper_time = 10.0; // years
     let proper_length = 100.0; // meters
@@ -47,11 +49,11 @@ fn run_metrics() -> anyhow::Result<()> {
         let gamma = lorentz_factor(v);
         let dilated_time = proper_time * gamma;
         let contracted_length = relativity::special::length_contraction(proper_length, v);
-        writeln!(
-        file,
-        "{:.2},{:.6},{:.1},{:.6},{:.1},{:.6}",
-        v_frac, gamma, proper_time, dilated_time, proper_length, contracted_length
-    )?;
+    //     writeln!(
+    //     file,
+    //     "{:.2},{:.6},{:.1},{:.6},{:.1},{:.6}",
+    //     v_frac, gamma, proper_time, dilated_time, proper_length, contracted_length
+    // )?;
 
     }
 

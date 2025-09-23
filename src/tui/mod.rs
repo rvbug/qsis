@@ -1,28 +1,28 @@
-use crossterm::event::{self, Event, KeyCode};
+use std::io;
+use crossterm::{
+    event::{self, Event, KeyCode},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen},
+};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
-    widgets::{Block, Borders, Paragraph},
+    style::{Color, Style},
+    symbols,
+    widgets::{Axis, Block, Borders, Chart, Dataset, Paragraph},
     Terminal,
 };
-use crossterm::execute;
-use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-use std::io;
 
-use plotters::prelude::*;
+use crate::relativity::special::{lorentz_factor, length_contraction, C};
+use crate::metrics::{DataPoint, export_csv, plot_results};
 
-use crate::relativity::special::{lorentz_factor, C, length_contraction };
-
-#[derive(Debug)]
-struct DataPoint {
-    velocity_fraction: f64,
-    gamma: f64,
-    proper_time: f64,
-    dilated_time: f64,
-    proper_length: f64,
-    contracted_length: f64,
+/// Chart display modes
+enum ChartMode {
+    All,
+    TimeDilation,
+    LengthContraction,
+    LorentzFactor,
 }
-
 
 pub fn start() -> anyhow::Result<()> {
     // Setup terminal
@@ -32,58 +32,124 @@ pub fn start() -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // State
+    // Simulation state
     let mut velocity_fraction: f64 = 0.0;
     let proper_time: f64 = 10.0;      // years
-    let proper_length: f64 = 100.0;   // meters  ✅ ADD THIS
+    let proper_length: f64 = 100.0;   // meters
     let mut log: Vec<DataPoint> = Vec::new();
+    let mut chart_mode = ChartMode::All;
 
     loop {
         terminal.draw(|f| {
-            let size = f.size();
+            let size = f.area();
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
-                .margin(2)
+                .margin(1)
                 .constraints(
                     [
-                        Constraint::Length(3),
-                        Constraint::Length(3),
-                        Constraint::Length(3),
-                        Constraint::Length(3),
+                        Constraint::Length(2),
+                        Constraint::Length(2),
+                        Constraint::Length(2),
+                        Constraint::Min(10),
                     ]
                     .as_ref(),
                 )
                 .split(size);
 
+            // Current values
             let v = velocity_fraction * C;
             let gamma = lorentz_factor(v);
             let dilated_time = proper_time * gamma;
-            let contracted_length = length_contraction(proper_length, v);  // ✅ fixed arg order
+            let contracted_length = length_contraction(proper_length, v);
 
-            let velocity_text = format!("Velocity: {:.2}c", velocity_fraction);
-            let gamma_text = format!("Lorentz factor (γ): {:.4}", gamma);
-            let time_text = format!(
-                "Proper time: {:.1} years | Dilated time: {:.2} years",
-                proper_time, dilated_time
-            );
-            let length_text = format!(
-                "Proper length: {:.1} m | Contracted length: {:.2} m",
-                proper_length, contracted_length
-            );
-
-            let blocks = vec![
-                Paragraph::new(velocity_text).block(Block::default().borders(Borders::ALL)),
-                Paragraph::new(gamma_text).block(Block::default().borders(Borders::ALL)),
-                Paragraph::new(time_text).block(Block::default().borders(Borders::ALL)),
-                Paragraph::new(length_text).block(Block::default().borders(Borders::ALL)),
+            // Top stats display
+            let stats = vec![
+                Paragraph::new(format!("Velocity: {:.2}c", velocity_fraction))
+                    .block(Block::default().borders(Borders::ALL)),
+                Paragraph::new(format!("Lorentz factor (γ): {:.4}", gamma))
+                    .block(Block::default().borders(Borders::ALL)),
+                Paragraph::new(format!(
+                    "Time: proper = {:.1} y | dilated = {:.2} y",
+                    proper_time, dilated_time
+                ))
+                .block(Block::default().borders(Borders::ALL)),
             ];
 
-            for (i, b) in blocks.into_iter().enumerate() {
-                f.render_widget(b, chunks[i]);
+            for (i, stat) in stats.into_iter().enumerate() {
+                f.render_widget(stat, chunks[i]);
             }
+
+
+            // Precompute all datasets safely
+            let gamma_data: Vec<(f64, f64)> = log.iter()
+                .map(|d| (d.velocity_fraction, d.gamma))
+                .collect();
+            let time_data: Vec<(f64, f64)> = log.iter()
+                .map(|d| (d.velocity_fraction, d.dilated_time))
+                .collect();
+            let length_data: Vec<(f64, f64)> = log.iter()
+                .map(|d| (d.velocity_fraction, d.contracted_length))
+                .collect();
+
+            let datasets = match chart_mode {
+                ChartMode::All => vec![
+                    Dataset::default()
+                        .name("γ (Lorentz)")
+                        .marker(symbols::Marker::Dot)
+                        .style(Style::default().fg(Color::Yellow))
+                        .data(&gamma_data),
+                    Dataset::default()
+                        .name("Time Dilation")
+                        .marker(symbols::Marker::Braille)
+                        .style(Style::default().fg(Color::Cyan))
+                        .data(&time_data),
+                    Dataset::default()
+                        .name("Length Contraction")
+                        .marker(symbols::Marker::Dot)
+                        .style(Style::default().fg(Color::Magenta))
+                        .data(&length_data),
+                ],
+                ChartMode::TimeDilation => vec![Dataset::default()
+                    .name("Time Dilation")
+                    .marker(symbols::Marker::Braille)
+                    .style(Style::default().fg(Color::Cyan))
+                    .data(&time_data)],
+                ChartMode::LengthContraction => vec![Dataset::default()
+                    .name("Length Contraction")
+                    .marker(symbols::Marker::Dot)
+                    .style(Style::default().fg(Color::Magenta))
+                    .data(&length_data)],
+                ChartMode::LorentzFactor => vec![Dataset::default()
+                    .name("γ (Lorentz)")
+                    .marker(symbols::Marker::Dot)
+                    .style(Style::default().fg(Color::Yellow))
+                    .data(&gamma_data)],
+            };
+
+
+
+            // Chart widget
+            let chart = Chart::new(datasets)
+                .block(
+                    Block::default()
+                        .title("Relativity Visualisation (a=all, t=time, l=length, g=γ, q=quit)")
+                        .borders(Borders::ALL),
+                )
+                .x_axis(
+                    Axis::default()
+                        .title("Velocity (c)")
+                        .bounds([0.0, 1.0]),
+                )
+                .y_axis(
+                    Axis::default()
+                        .title("Values")
+                        .bounds([0.0, proper_time * 10.0]),
+                );
+
+            f.render_widget(chart, chunks[3]);
         })?;
 
-        // Input handling
+        // Handle input
         if event::poll(std::time::Duration::from_millis(200))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
@@ -91,14 +157,18 @@ pub fn start() -> anyhow::Result<()> {
                         if velocity_fraction < 0.99 {
                             velocity_fraction += 0.01;
                         }
-                        log.push(snapshot(velocity_fraction, proper_time, proper_length));  // ✅ fixed
+                        log.push(snapshot(velocity_fraction, proper_time, proper_length));
                     }
                     KeyCode::Left => {
                         if velocity_fraction > 0.0 {
                             velocity_fraction -= 0.01;
                         }
-                        log.push(snapshot(velocity_fraction, proper_time, proper_length));  // ✅ fixed
+                        log.push(snapshot(velocity_fraction, proper_time, proper_length));
                     }
+                    KeyCode::Char('a') => chart_mode = ChartMode::All,
+                    KeyCode::Char('t') => chart_mode = ChartMode::TimeDilation,
+                    KeyCode::Char('l') => chart_mode = ChartMode::LengthContraction,
+                    KeyCode::Char('g') => chart_mode = ChartMode::LorentzFactor,
                     KeyCode::Char('q') => {
                         crossterm::terminal::disable_raw_mode()?;
                         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -106,7 +176,6 @@ pub fn start() -> anyhow::Result<()> {
 
                         export_csv(&log)?;
                         plot_results(&log)?;
-
                         break;
                     }
                     _ => {}
@@ -117,8 +186,6 @@ pub fn start() -> anyhow::Result<()> {
 
     Ok(())
 }
-
-
 
 fn snapshot(velocity_fraction: f64, proper_time: f64, proper_length: f64) -> DataPoint {
     let v = velocity_fraction * C;
@@ -134,52 +201,5 @@ fn snapshot(velocity_fraction: f64, proper_time: f64, proper_length: f64) -> Dat
         proper_length,
         contracted_length,
     }
-}
-
-fn export_csv(log: &Vec<DataPoint>) -> anyhow::Result<()> {
-    use std::fs::File;
-    use std::io::Write;
-
-    let mut file = File::create("realtime.csv")?;
-    writeln!(file, "velocity_fraction,gamma,proper_time,dilated_time")?;
-
-    for entry in log {
-        writeln!(
-            file,
-            "{:.2},{:.6},{:.1},{:.6}",
-            entry.velocity_fraction, entry.gamma, entry.proper_time, entry.dilated_time
-        )?;
-    }
-    println!("✅ Data exported to realtime.csv");
-    Ok(())
-}
-
-fn plot_results(log: &Vec<DataPoint>) -> anyhow::Result<()> {
-    let root = BitMapBackend::new("plot.png", (800, 600)).into_drawing_area();
-    root.fill(&WHITE)?;
-
-    let y_max = log.iter().map(|d| d.dilated_time).fold(0.0, f64::max).ceil();
-
-    let mut chart = ChartBuilder::on(&root)
-        .caption("Time Dilation vs Velocity", ("sans-serif", 24))
-        .margin(10)
-        .x_label_area_size(40)
-        .y_label_area_size(50)
-        .build_cartesian_2d(0f64..1f64, 0f64..y_max)?;
-
-    chart
-        .configure_mesh()
-        .x_desc("Velocity (fraction of c)")
-        .y_desc("Dilated Time (years)")
-        .draw()?;
-
-    let series: Vec<(f64, f64)> = log
-        .iter()
-        .map(|d| (d.velocity_fraction, d.dilated_time))
-        .collect();
-
-    chart.draw_series(LineSeries::new(series, &RED))?;
-    println!("✅ Plot saved to plot.png");
-    Ok(())
 }
 
