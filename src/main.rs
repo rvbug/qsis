@@ -47,8 +47,8 @@ fn run_metrics() -> anyhow::Result<()> {
         let v_frac = i as f64 / 100.0;
         let v = v_frac * relativity::special::C;
         let gamma = lorentz_factor(v);
-        let dilated_time = proper_time * gamma;
-        let contracted_length = relativity::special::length_contraction(proper_length, v);
+        // let dilated_time = proper_time * gamma;
+        // let contracted_length = relativity::special::length_contraction(proper_length, v);
     //     writeln!(
     //     file,
     //     "{:.2},{:.6},{:.1},{:.6},{:.1},{:.6}",
